@@ -7,12 +7,22 @@ Files each selected message into the folder whose path matches its tag name.
 | one tag matching a folder            | moved to that folder                                      |
 | nested tags (`System` + `System/Logs`) | only the innermost counts → moved to System/Logs        |
 | several unrelated/sibling tags (`System/Logs/Servers` + `System/Logs/Devices`) | copied to all but the last, moved to the last (Settings → Tags order) |
-| no tags, or only built-in tags (Important, Work, …) | normal Archive                             |
+| no tags, but a reply in a thread     | moved to the folder holding the most recent earlier message of the thread (see below) |
+| no tags and no thread folder found   | normal Archive                                            |
 | a custom tag with no matching folder | left in place, with a notification                        |
 | already in one of its tag folders    | copied to the other tag folders, left where it is         |
 
 Tag name `Announcements/Chourei` ↔ folder `Announcements/Chourei` in the same account (exact match, case-sensitive).
 Moves and copies can be undone with Ctrl+Z.
+
+## Thread filing (1.2)
+For an untagged message, the add-on reads its `In-Reply-To` and `References` headers and searches
+the same account for those earlier messages, newest first. The first one found in a regular folder
+decides the destination. Inbox, Sent, Drafts, Trash, Junk, Templates and Outbox are ignored;
+an Archives folder is used only if the thread is found nowhere else. If the message already sits
+in its thread's folder, it stays. Tags always win over the thread.
+
+Every decision is logged: Add-ons Manager → gear → Debug Add-ons → Inspect → Console.
 
 ## Using it
 - **Ctrl+Shift+A**, or
@@ -24,7 +34,7 @@ Moves and copies can be undone with Ctrl+Z.
 > go to Add-ons Manager → gear icon → **Manage Extension Shortcuts** and set another key.
 
 ## Installing
-Add-ons Manager (Tools → Add-ons and Themes) → gear icon → **Install Add-on From File…** → `file-by-tag-1.1.0.xpi`.
+Add-ons Manager (Tools → Add-ons and Themes) → gear icon → **Install Add-on From File…** → `file-by-tag-1.2.0.xpi`.
 
 For testing changes without reinstalling: gear icon → **Debug Add-ons** → **Load Temporary Add-on…** → pick `manifest.json`
 (removed when Thunderbird restarts).

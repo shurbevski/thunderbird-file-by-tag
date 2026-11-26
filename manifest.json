@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "File by Tag",
-  "version": "1.1.1",
-  "description": "One-click filing: moves each selected message to the folder whose path matches its innermost tag (copies it when it has several unrelated tags). Untagged messages are archived as usual.",
+  "version": "1.2.0",
+  "description": "One-click filing: moves each selected message to the folder whose path matches its innermost tag (copies it when it has several unrelated tags). Untagged replies go to the folder of their thread; anything else is archived as usual.",
   "author": "Aleksandar Shurbevski",
   "browser_specific_settings": {
     "gecko": {

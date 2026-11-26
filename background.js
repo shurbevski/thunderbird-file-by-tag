@@ -7,7 +7,9 @@
 //   nested tags         -> only the innermost counts ("System" + "System/Logs"
 //                          -> System/Logs)
 //   several leaves      -> copy to all but the last, move to the last
-//   none (or built-in)  -> normal Archive
+//   no tags             -> the folder where the rest of its thread lives
+//                          (found via In-Reply-To / References)
+//   none of the above   -> normal Archive
 // A tag that looks like one of yours but has no folder leaves the message
 // in place and is reported, so nothing is filed somewhere unexpected.
 
@@ -69,6 +71,57 @@ async function foldersOf(accountId) {
   return folderCache.get(accountId);
 }
 
+const log = (...args) => console.info("File by Tag:", ...args);
+
+// Folders that never count as "where the thread lives".
+const IGNORED_USES = new Set(["inbox", "drafts", "sent", "trash", "templates", "junk", "outbox"]);
+const MAX_REFS = 30; // how many earlier messages of a thread to look up
+
+function headerValues(headers, name) {
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (k.toLowerCase() === name) return Array.isArray(v) ? v : [v];
+  }
+  return [];
+}
+
+// Message-IDs this message replies to, newest first, without <>.
+async function threadRefs(msg) {
+  const full = await messenger.messages.getFull(msg.id, { decodeContent: false });
+  const text = [...headerValues(full.headers, "in-reply-to"),
+                ...headerValues(full.headers, "references").reverse()].join(" ");
+  const ids = [];
+  for (const m of text.matchAll(/<([^<>\s]+)>/g)) {
+    if (!ids.includes(m[1]) && m[1] !== msg.headerMessageId) ids.push(m[1]);
+  }
+  return ids.slice(0, MAX_REFS);
+}
+
+// The folder holding the most recent earlier message of msg's thread,
+// or null. Archive folders are used only if nothing better is found.
+async function threadFolder(msg) {
+  const refs = await threadRefs(msg);
+  let archiveFallback = null;
+  for (const ref of refs) {
+    const found = await collect(messenger.messages.query({
+      headerMessageId: ref,
+      accountId: msg.folder.accountId,
+    }));
+    for (const m of found) {
+      const f = m.folder;
+      if (!f || f.isVirtual) continue;
+      const uses = f.specialUse || [];
+      if (uses.some((u) => IGNORED_USES.has(u)) || /^\/?INBOX$/i.test(f.path)) continue;
+      if (f.id === msg.folder.id) return f; // already with its thread
+      if (uses.includes("archives") || /^\/?Archives?(\/|$)/i.test(f.path)) {
+        archiveFallback ??= f;
+        continue;
+      }
+      return f;
+    }
+  }
+  return archiveFallback;
+}
+
 function push(map, key, id) {
   if (!map.has(key)) map.set(key, []);
   map.get(key).push(id);
@@ -88,6 +141,7 @@ async function fileMessages(messages) {
   const copies = new Map(); // folderId -> [messageId]
   const moves = new Map();  // folderId -> [messageId]
   const archive = [];
+  const byThread = []; // untagged messages: try their thread's folder
   const missing = new Set();
   let skipped = 0;
 
@@ -116,11 +170,12 @@ async function fileMessages(messages) {
     dests.splice(0, dests.length, ...leaves);
 
     if (!dests.length) {
-      if (unmatched) skipped++;       // a custom tag with no folder: leave it
-      else archive.push(msg.id);      // untagged or only built-in tags
+      if (unmatched) { skipped++; log(msg.subject, "-> left (tag without folder)"); }
+      else byThread.push(msg);        // untagged or only built-in tags
       continue;
     }
 
+    log(msg.subject, "-> by tag:", dests.map((d) => d.path).join(", "));
     const here = dests.findIndex((d) => d.id === msg.folder.id);
     if (here >= 0) {
       // Already sits in one of its folders: copy to the others, leave it.
@@ -129,6 +184,26 @@ async function fileMessages(messages) {
     }
     for (const d of dests.slice(0, -1)) push(copies, d.id, msg.id);
     push(moves, dests[dests.length - 1].id, msg.id);
+  }
+
+  let threaded = 0;
+  for (const msg of byThread) {
+    let folder = null;
+    try {
+      folder = await threadFolder(msg);
+    } catch (e) {
+      console.warn("File by Tag: thread lookup failed for", msg.subject, e);
+    }
+    if (folder && folder.id === msg.folder.id) {
+      log(msg.subject, "-> left (already in its thread's folder)");
+    } else if (folder) {
+      log(msg.subject, "-> by thread:", folder.path);
+      push(moves, folder.id, msg.id);
+      threaded++;
+    } else {
+      log(msg.subject, "-> archive");
+      archive.push(msg.id);
+    }
   }
 
   let copied = 0, moved = 0;
